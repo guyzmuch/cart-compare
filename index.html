@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cart Compare</title>
+<link rel="icon" href="data:,">
+<style>
+  body { font-family: system-ui, sans-serif; }
+  table { border-collapse: collapse; }
+  th, td { padding: 6px 10px; border-bottom: 1px solid #ddd; }
+  tr:hover td { background: #f5f5f5; }
+  td:first-child { padding-right: 40px; }          /* space after the product name */
+  td:nth-child(2) { text-align: right; }           /* prices */
+  td:has(input), th { text-align: center; }        /* checkboxes and headers */
+  th:first-child { text-align: left; }
+  tr:nth-last-child(-n+2) th { border-bottom: 0; } /* total and diff rows */
+  .cheaper { color: #1a7f37; }                     /* diff vs scenario 1 */
+  .pricier { color: #cf222e; }
+</style>
+</head>
+<body>
+<p><button id="add">Add scenario</button></p>
+
+<table id="table"></table>
+
+<p>
+  <label for="list">Items, one per line as <code>Name,price</code></label><br>
+  <textarea id="list" rows="8" cols="40"></textarea><br>
+  <button id="apply">Apply list</button>
+</p>
+
+<script>
+// State lives in the URL: ?items=[["Name",12.5],...]&sc=[[0,2],[1]]
+// items: [name, cents]   scenarios: one array of ticked item indexes per scenario
+const table = document.getElementById('table');
+const list = document.getElementById('list');
+
+// "€ 12,50" -> 1250 (null if not a number)
+function toCents(text) {
+  const n = Number(text.replace(/[€$\s]/g, '').replace(',', '.'));
+  return text.trim() && Number.isFinite(n) ? Math.round(n * 100) : null;
+}
+
+const format = cents => (cents / 100).toFixed(2);
+const escape = text => text.replace(/[&<>"]/g, c => '&#' + c.charCodeAt(0) + ';');
+
+// Every param is an item (?Coins=19.90&Dice=7), except _sc which holds the ticks:
+// _sc=0.2,1 means scenario 1 has items 0 and 2 ticked, scenario 2 has item 1.
+const params = new URLSearchParams(location.search);
+let items = [];
+for (const [name, price] of params) {
+  const cents = toCents(price);
+  if (name !== '_sc' && cents !== null) items.push([name, cents]);
+}
+let scenarios = (params.get('_sc') ?? ',').split(',')
+  .map(s => s ? s.split('.').map(Number).filter(i => items[i]) : []);
+
+function save() {
+  const p = new URLSearchParams(items.map(([name, cents]) => [name, format(cents)]));
+  p.append('_sc', scenarios.map(ticked => ticked.join('.')).join(','));
+  history.replaceState(null, '', '?' + p);
+}
+
+function render() {
+  let html = '<tr><th>Item</th><th>Price</th>';
+  scenarios.forEach((_, s) => html += `<th>Scenario ${s + 1}</th>`);
+  html += '</tr>';
+
+  items.forEach(([name, cents], i) => {
+    html += `<tr><td>${escape(name)}</td><td>${format(cents)}</td>`;
+    scenarios.forEach((ticked, s) => {
+      html += `<td><input type="checkbox" data-s="${s}" data-i="${i}" ${ticked.includes(i) ? 'checked' : ''}
+               aria-label="${escape(name)} in scenario ${s + 1}"></td>`;
+    });
+    html += '</tr>';
+  });
+
+  const totals = scenarios.map(ticked => ticked.reduce((sum, i) => sum + items[i][1], 0));
+  html += '<tr><th>Total</th><th></th>';
+  totals.forEach(total => html += `<th>${format(total)}</th>`);
+  html += '</tr>';
+
+  // Difference with scenario 1 (the reference)
+  html += '<tr><th>Diff vs 1</th><th></th>';
+  totals.forEach((total, s) => {
+    const diff = total - totals[0];
+    const color = diff < 0 ? 'cheaper' : diff > 0 ? 'pricier' : '';
+    html += `<th class="${color}">${s === 0 ? '' : (diff > 0 ? '+' : '') + format(diff)}</th>`;
+  });
+  html += '</tr>';
+
+  table.innerHTML = html;
+  list.value = items.map(([name, cents]) => name + ',' + format(cents)).join('\n');
+}
+
+// Tick / untick a box
+table.addEventListener('change', e => {
+  const s = Number(e.target.dataset.s), i = Number(e.target.dataset.i);
+  scenarios[s] = e.target.checked ? [...scenarios[s], i] : scenarios[s].filter(x => x !== i);
+  save();
+  render();
+  table.querySelector(`[data-s="${s}"][data-i="${i}"]`).focus(); // keep keyboard focus
+});
+
+// Replace the item list from the textarea (lines that don't parse are skipped)
+document.getElementById('apply').addEventListener('click', () => {
+  items = [];
+  for (const line of list.value.split('\n')) {
+    const comma = line.indexOf(',');
+    const name = line.slice(0, comma).trim();
+    const cents = comma > 0 ? toCents(line.slice(comma + 1)) : null;
+    if (name && cents !== null) items.push([name, cents]);
+  }
+  scenarios = scenarios.map(() => []);
+  save();
+  render();
+});
+
+document.getElementById('add').addEventListener('click', () => {
+  scenarios.push([]);
+  save();
+  render();
+});
+
+render();
+</script>
+</body>
+</html>
