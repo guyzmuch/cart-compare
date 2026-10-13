@@ -12,7 +12,16 @@
   tr:hover td { background: #f5f5f5; }
   td:first-child { padding-right: 40px; }          /* space after the product name */
   td:nth-child(2) { text-align: right; }           /* prices */
-  td:has(input), th { text-align: center; }        /* checkboxes and headers */
+  td:has(button), th { text-align: center; }       /* quantity cells and headers */
+  .step {                                          /* round "−" / "+" buttons */
+    width: 26px; height: 26px; padding: 0;
+    border: 1px solid #ccc; border-radius: 50%;
+    background: #fff; font-size: 16px; line-height: 1; cursor: pointer;
+  }
+  .step:hover { background: #eee; }
+  .step:disabled { opacity: .3; cursor: default; }
+  .qty { display: inline-block; width: 2em; }
+  .qty.zero { color: #bbb; }
   th:first-child { text-align: left; }
   tr:nth-last-child(-n+2) th { border-bottom: 0; } /* total and diff rows */
   .cheaper { color: #1a7f37; }                     /* diff vs scenario 1 */
@@ -31,8 +40,8 @@
 </p>
 
 <script>
-// State lives in the URL: ?items=[["Name",12.5],...]&sc=[[0,2],[1]]
-// items: [name, cents]   scenarios: one array of ticked item indexes per scenario
+// State lives in the URL (see below).
+// items: [name, cents]   scenarios: one { itemIndex: quantity } object per scenario
 const table = document.getElementById('table');
 const list = document.getElementById('list');
 
@@ -46,19 +55,26 @@ const format = cents => (cents / 100).toFixed(2);
 const escape = text => text.replace(/[&<>"]/g, c => '&#' + c.charCodeAt(0) + ';');
 
 // Every param is an item (?Coins=19.90&Dice=7), except _sc which holds the ticks:
-// _sc=0.2,1 means scenario 1 has items 0 and 2 ticked, scenario 2 has item 1.
+// _sc=0.2x3,1 means scenario 1 has item 0 once and item 2 three times, scenario 2 has item 1.
 const params = new URLSearchParams(location.search);
 let items = [];
 for (const [name, price] of params) {
   const cents = toCents(price);
   if (name !== '_sc' && cents !== null) items.push([name, cents]);
 }
-let scenarios = (params.get('_sc') ?? ',').split(',')
-  .map(s => s ? s.split('.').map(Number).filter(i => items[i]) : []);
+let scenarios = (params.get('_sc') ?? ',').split(',').map(s => {
+  const ticked = {};
+  for (const entry of s ? s.split('.') : []) {
+    const [i, qty = 1] = entry.split('x').map(Number);
+    if (items[i] && qty > 0) ticked[i] = qty;
+  }
+  return ticked;
+});
 
 function save() {
   const p = new URLSearchParams(items.map(([name, cents]) => [name, format(cents)]));
-  p.append('_sc', scenarios.map(ticked => ticked.join('.')).join(','));
+  p.append('_sc', scenarios.map(ticked =>
+    Object.entries(ticked).map(([i, qty]) => qty > 1 ? i + 'x' + qty : i).join('.')).join(','));
   history.replaceState(null, '', '?' + p);
 }
 
@@ -70,13 +86,19 @@ function render() {
   items.forEach(([name, cents], i) => {
     html += `<tr><td>${escape(name)}</td><td>${format(cents)}</td>`;
     scenarios.forEach((ticked, s) => {
-      html += `<td><input type="checkbox" data-s="${s}" data-i="${i}" ${ticked.includes(i) ? 'checked' : ''}
-               aria-label="${escape(name)} in scenario ${s + 1}"></td>`;
+      const qty = ticked[i] || 0;
+      const where = `${escape(name)} in scenario ${s + 1}`;
+      html += `<td>
+        <button class="step" data-s="${s}" data-i="${i}" data-d="-1" ${qty ? '' : 'disabled'} aria-label="Remove one ${where}">−</button>
+        <span class="qty ${qty ? '' : 'zero'}">${qty}</span>
+        <button class="step" data-s="${s}" data-i="${i}" data-d="1" aria-label="Add one ${where}">+</button>
+      </td>`;
     });
     html += '</tr>';
   });
 
-  const totals = scenarios.map(ticked => ticked.reduce((sum, i) => sum + items[i][1], 0));
+  const totals = scenarios.map(ticked =>
+    Object.entries(ticked).reduce((sum, [i, qty]) => sum + items[i][1] * qty, 0));
   html += '<tr><th>Total</th><th></th>';
   totals.forEach(total => html += `<th>${format(total)}</th>`);
   html += '</tr>';
@@ -94,13 +116,18 @@ function render() {
   list.value = items.map(([name, cents]) => name + ',' + format(cents)).join('\n');
 }
 
-// Tick / untick a box
-table.addEventListener('change', e => {
-  const s = Number(e.target.dataset.s), i = Number(e.target.dataset.i);
-  scenarios[s] = e.target.checked ? [...scenarios[s], i] : scenarios[s].filter(x => x !== i);
+// "+" / "−" buttons: change the quantity by one (0 removes the item)
+table.addEventListener('click', e => {
+  const { s, i, d } = e.target.dataset;
+  if (!d) return;
+  const qty = (scenarios[s][i] || 0) + Number(d);
+  if (qty > 0) scenarios[s][i] = qty;
+  else delete scenarios[s][i];
   save();
   render();
-  table.querySelector(`[data-s="${s}"][data-i="${i}"]`).focus(); // keep keyboard focus
+  // keep keyboard focus on the same button ("+" if "−" just got disabled)
+  const same = table.querySelector(`[data-s="${s}"][data-i="${i}"][data-d="${d}"]:enabled`);
+  (same || table.querySelector(`[data-s="${s}"][data-i="${i}"][data-d="1"]`)).focus();
 });
 
 // Replace the item list from the textarea (lines that don't parse are skipped)
@@ -112,13 +139,13 @@ document.getElementById('apply').addEventListener('click', () => {
     const cents = comma > 0 ? toCents(line.slice(comma + 1)) : null;
     if (name && cents !== null) items.push([name, cents]);
   }
-  scenarios = scenarios.map(() => []);
+  scenarios = scenarios.map(() => ({}));
   save();
   render();
 });
 
 document.getElementById('add').addEventListener('click', () => {
-  scenarios.push([]);
+  scenarios.push({});
   save();
   render();
 });
