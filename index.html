@@ -23,7 +23,7 @@
   .qty { display: inline-block; width: 2em; }
   .qty.zero { color: #bbb; }
   th:first-child { text-align: left; }
-  tr:nth-last-child(-n+2) th { border-bottom: 0; } /* total and diff rows */
+  tfoot th { border-bottom: 0; }                   /* total and diff rows */
   .cheaper { color: #1a7f37; }                     /* diff vs scenario 1 */
   .pricier { color: #cf222e; }
 </style>
@@ -31,7 +31,26 @@
 <body>
 <p><button id="add">Add scenario</button></p>
 
-<table id="table"></table>
+<table id="table">
+  <thead><tr><th>Item</th><th>Price</th></tr></thead>
+  <tbody></tbody>
+  <tfoot>
+    <tr><th>Total</th><th></th></tr>
+    <tr><th>Diff vs 1</th><th></th></tr>
+  </tfoot>
+</table>
+
+<!-- One item row; a quantity cell is appended to it per scenario -->
+<template id="row-template">
+  <tr><td class="name"></td><td class="price"></td></tr>
+</template>
+<template id="cell-template">
+  <td>
+    <button class="step" data-d="-1">−</button>
+    <span class="qty"></span>
+    <button class="step" data-d="1">+</button>
+  </td>
+</template>
 
 <p>
   <label for="list">Items, one per line as <code>Name,price</code></label><br>
@@ -52,7 +71,13 @@ function toCents(text) {
 }
 
 const format = cents => (cents / 100).toFixed(2);
-const escape = text => text.replace(/[&<>"]/g, c => '&#' + c.charCodeAt(0) + ';');
+const clone = id => document.getElementById(id).content.firstElementChild.cloneNode(true);
+
+function th(text) {
+  const cell = document.createElement('th');
+  cell.textContent = text;
+  return cell;
+}
 
 // Every param is an item (?Coins=19.90&Dice=7), except _sc which holds the ticks:
 // _sc=0.2x3,1 means scenario 1 has item 0 once and item 2 three times, scenario 2 has item 1.
@@ -79,40 +104,53 @@ function save() {
 }
 
 function render() {
-  let html = '<tr><th>Item</th><th>Price</th>';
-  scenarios.forEach((_, s) => html += `<th>Scenario ${s + 1}</th>`);
-  html += '</tr>';
+  const [headRow] = table.tHead.rows;
+  const [totalRow, diffRow] = table.tFoot.rows;
 
-  items.forEach(([name, cents], i) => {
-    html += `<tr><td>${escape(name)}</td><td>${format(cents)}</td>`;
+  // Remove the previous scenario columns (keep the first two cells)
+  for (const row of [headRow, totalRow, diffRow]) {
+    while (row.cells.length > 2) row.deleteCell(-1);
+  }
+
+  scenarios.forEach((_, s) => headRow.append(th(`Scenario ${s + 1}`)));
+
+  // One row per item, one quantity cell per scenario
+  table.tBodies[0].replaceChildren(...items.map(([name, cents], i) => {
+    const row = clone('row-template');
+    row.querySelector('.name').textContent = name;
+    row.querySelector('.price').textContent = format(cents);
+
     scenarios.forEach((ticked, s) => {
       const qty = ticked[i] || 0;
-      const where = `${escape(name)} in scenario ${s + 1}`;
-      html += `<td>
-        <button class="step" data-s="${s}" data-i="${i}" data-d="-1" ${qty ? '' : 'disabled'} aria-label="Remove one ${where}">−</button>
-        <span class="qty ${qty ? '' : 'zero'}">${qty}</span>
-        <button class="step" data-s="${s}" data-i="${i}" data-d="1" aria-label="Add one ${where}">+</button>
-      </td>`;
+      const cell = clone('cell-template');
+      const [minus, plus] = cell.querySelectorAll('button');
+      const count = cell.querySelector('.qty');
+
+      Object.assign(minus.dataset, { s, i });
+      Object.assign(plus.dataset, { s, i });
+      minus.setAttribute('aria-label', `Remove one ${name} in scenario ${s + 1}`);
+      plus.setAttribute('aria-label', `Add one ${name} in scenario ${s + 1}`);
+      minus.disabled = !qty;
+      count.textContent = qty;
+      count.classList.toggle('zero', !qty);
+      row.append(cell);
     });
-    html += '</tr>';
-  });
+    return row;
+  }));
 
   const totals = scenarios.map(ticked =>
     Object.entries(ticked).reduce((sum, [i, qty]) => sum + items[i][1] * qty, 0));
-  html += '<tr><th>Total</th><th></th>';
-  totals.forEach(total => html += `<th>${format(total)}</th>`);
-  html += '</tr>';
+  totals.forEach(total => totalRow.append(th(format(total))));
 
   // Difference with scenario 1 (the reference)
-  html += '<tr><th>Diff vs 1</th><th></th>';
   totals.forEach((total, s) => {
     const diff = total - totals[0];
-    const color = diff < 0 ? 'cheaper' : diff > 0 ? 'pricier' : '';
-    html += `<th class="${color}">${s === 0 ? '' : (diff > 0 ? '+' : '') + format(diff)}</th>`;
+    const cell = th(s === 0 ? '' : (diff > 0 ? '+' : '') + format(diff));
+    if (diff < 0) cell.className = 'cheaper';
+    if (diff > 0) cell.className = 'pricier';
+    diffRow.append(cell);
   });
-  html += '</tr>';
 
-  table.innerHTML = html;
   list.value = items.map(([name, cents]) => name + ',' + format(cents)).join('\n');
 }
 

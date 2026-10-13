@@ -10,8 +10,8 @@ const withItems = list => FILE_URL + '?' + new URLSearchParams(list.map(([name, 
 const plus = (page, item, s) => page.getByRole('button', { name: `Add one ${item} in scenario ${s}` });
 const minus = (page, item, s) => page.getByRole('button', { name: `Remove one ${item} in scenario ${s}` });
 const count = (page, item, s) => plus(page, item, s).locator('xpath=preceding-sibling::span');
-const totals = page => page.locator('tr:nth-last-child(2) th:nth-child(n+3)');
-const diffs = page => page.locator('tr:last-child th:nth-child(n+3)');
+const totals = page => page.locator('tfoot tr:first-child th:nth-child(n+3)');
+const diffs = page => page.locator('tfoot tr:last-child th:nth-child(n+3)');
 
 // Every test fails on console errors, page errors, or any network request.
 let problems;
@@ -37,6 +37,12 @@ test('accepts a hand-typed URL with currencies and decimal commas', async ({ pag
   await page.goto(FILE_URL + '?Base pledge=€99&Coins=19,90&Dice %26 Co=$7');
   await expect(page.locator('tr:has(.step) td:nth-child(1)')).toHaveText(['Base pledge', 'Coins', 'Dice & Co']);
   await expect(page.locator('tr:has(.step) td:nth-child(2)')).toHaveText(['99.00', '19.90', '7.00']);
+});
+
+test('item names are shown as plain text, never as HTML', async ({ page }) => {
+  await page.goto(withItems([['<b>Pack</b>', 5]]));
+  await expect(page.locator('tbody td.name')).toHaveText('<b>Pack</b>');
+  await expect(page.locator('tbody b')).toHaveCount(0);
 });
 
 test('two scenarios give two correct, independent totals', async ({ page }) => {
