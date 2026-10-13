@@ -26,6 +26,9 @@
   tfoot th { border-bottom: 0; }                   /* total and diff rows */
   .cheaper { color: #1a7f37; }                     /* diff vs scenario 1 */
   .pricier { color: #cf222e; }
+  .settings { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 16px; }
+  .settings label { display: block; margin-bottom: 4px; }
+  .settings textarea { max-width: 100%; }
 </style>
 </head>
 <body>
@@ -36,6 +39,8 @@
   <tbody></tbody>
   <tfoot>
     <tr><th>Total</th><th></th></tr>
+    <tr hidden><th>Tax</th><th></th></tr>
+    <tr hidden><th>Total with tax</th><th></th></tr>
     <tr><th>Diff vs 1</th><th></th></tr>
   </tfoot>
 </table>
@@ -52,22 +57,36 @@
   </td>
 </template>
 
-<p>
-  <label for="list">Items, one per line as <code>Name,price</code></label><br>
-  <textarea id="list" rows="8" cols="40"></textarea><br>
-  <button id="apply">Apply list</button>
-</p>
+<!-- Items list and tax side by side; the tax wraps under on small screens -->
+<div class="settings">
+  <div>
+    <label for="list">Items, one per line as <code>Name,price</code></label>
+    <textarea id="list" rows="8" cols="40"></textarea>
+  </div>
+  <div>
+    <label for="tax">Tax (%)</label>
+    <input id="tax" inputmode="decimal" size="5">
+  </div>
+</div>
+<p><button id="apply">Apply list</button></p>
 
 <script>
 // State lives in the URL (see below).
 // items: [name, cents]   scenarios: one { itemIndex: quantity } object per scenario
 const table = document.getElementById('table');
 const list = document.getElementById('list');
+const taxInput = document.getElementById('tax');
 
 // "€ 12,50" -> 1250 (null if not a number)
 function toCents(text) {
   const n = Number(text.replace(/[€$\s]/g, '').replace(',', '.'));
   return text.trim() && Number.isFinite(n) ? Math.round(n * 100) : null;
+}
+
+// "20", "20 %", "7,5" -> 20, 20, 7.5 (0 if empty or not a number)
+function toRate(text) {
+  const n = Number(text.replace(/[%\s]/g, '').replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 const format = cents => (cents / 100).toFixed(2);
@@ -79,14 +98,17 @@ function th(text) {
   return cell;
 }
 
-// Every param is an item (?Coins=19.90&Dice=7), except _sc which holds the ticks:
+// Every param is an item (?Coins=19.90&Dice=7), except the ones starting with "_":
 // _sc=0.2x3,1 means scenario 1 has item 0 once and item 2 three times, scenario 2 has item 1.
+// _tax=20 is the tax rate in percent.
 const params = new URLSearchParams(location.search);
 let items = [];
 for (const [name, price] of params) {
   const cents = toCents(price);
-  if (name !== '_sc' && cents !== null) items.push([name, cents]);
+  if (!name.startsWith('_') && cents !== null) items.push([name, cents]);
 }
+let taxRate = toRate(params.get('_tax') ?? '');
+taxInput.value = taxRate || '';
 let scenarios = (params.get('_sc') ?? ',').split(',').map(s => {
   const ticked = {};
   for (const entry of s ? s.split('.') : []) {
@@ -100,15 +122,16 @@ function save() {
   const p = new URLSearchParams(items.map(([name, cents]) => [name, format(cents)]));
   p.append('_sc', scenarios.map(ticked =>
     Object.entries(ticked).map(([i, qty]) => qty > 1 ? i + 'x' + qty : i).join('.')).join(','));
+  if (taxRate) p.append('_tax', taxRate);
   history.replaceState(null, '', '?' + p);
 }
 
 function render() {
   const [headRow] = table.tHead.rows;
-  const [totalRow, diffRow] = table.tFoot.rows;
+  const [totalRow, taxRow, withTaxRow, diffRow] = table.tFoot.rows;
 
   // Remove the previous scenario columns (keep the first two cells)
-  for (const row of [headRow, totalRow, diffRow]) {
+  for (const row of [headRow, totalRow, taxRow, withTaxRow, diffRow]) {
     while (row.cells.length > 2) row.deleteCell(-1);
   }
 
@@ -142,9 +165,17 @@ function render() {
     Object.entries(ticked).reduce((sum, [i, qty]) => sum + items[i][1] * qty, 0));
   totals.forEach(total => totalRow.append(th(format(total))));
 
-  // Difference with scenario 1 (the reference)
-  totals.forEach((total, s) => {
-    const diff = total - totals[0];
+  // Tax rows, only shown when a tax rate is set
+  const taxes = totals.map(total => Math.round(total * taxRate / 100));
+  const finals = totals.map((total, s) => total + taxes[s]);
+  taxRow.hidden = withTaxRow.hidden = !taxRate;
+  taxRow.cells[0].textContent = `Tax (${taxRate}%)`;
+  taxes.forEach(tax => taxRow.append(th(format(tax))));
+  finals.forEach(final => withTaxRow.append(th(format(final))));
+
+  // Difference with scenario 1 (the reference), on the amount actually paid
+  finals.forEach((total, s) => {
+    const diff = total - finals[0];
     const cell = th(s === 0 ? '' : (diff > 0 ? '+' : '') + format(diff));
     if (diff < 0) cell.className = 'cheaper';
     if (diff > 0) cell.className = 'pricier';
@@ -184,6 +215,13 @@ document.getElementById('apply').addEventListener('click', () => {
 
 document.getElementById('add').addEventListener('click', () => {
   scenarios.push({});
+  save();
+  render();
+});
+
+// Tax rate: applied as you type
+taxInput.addEventListener('input', () => {
+  taxRate = toRate(taxInput.value);
   save();
   render();
 });

@@ -114,6 +114,53 @@ test('reads quantities from a hand-typed _sc', async ({ page }) => {
   await expect(totals(page)).toHaveText(['100.00', '71.00']);
 });
 
+test('tax: no tax rows when empty, tax and total with tax when set', async ({ page }) => {
+  const taxRows = page.locator('tfoot tr:nth-child(2), tfoot tr:nth-child(3)');
+  await page.goto(withItems(ITEMS) + '&_sc=0.2,1');
+  await expect(taxRows).toHaveCount(2);
+  await expect(taxRows.first()).toBeHidden();
+  await expect(taxRows.last()).toBeHidden();
+
+  await page.getByLabel('Tax (%)').fill('20');
+  // scenario 1 = 99 + 19.90 = 118.90, scenario 2 = 35.50
+  await expect(page.locator('tfoot tr:nth-child(2) th')).toHaveText(['Tax (20%)', '', '23.78', '7.10']);
+  await expect(page.locator('tfoot tr:nth-child(3) th')).toHaveText(['Total with tax', '', '142.68', '42.60']);
+  await expect(diffs(page)).toHaveText(['', '-100.08']); // diff on the total with tax
+  await expect(page).toHaveURL(/_tax=20$/);
+
+  await page.reload();
+  await expect(page.getByLabel('Tax (%)')).toHaveValue('20');
+  await expect(taxRows.first()).toBeVisible();
+
+  await page.getByLabel('Tax (%)').fill('');
+  await expect(taxRows.first()).toBeHidden();
+  await expect(page).not.toHaveURL(/_tax/);
+});
+
+test('tax from a hand-typed URL accepts decimal commas', async ({ page }) => {
+  await page.goto(withItems([['Thing', 100]]) + '&_sc=0,&_tax=7,5');
+  await expect(page.getByLabel('Tax (%)')).toHaveValue('7.5');
+  await expect(page.locator('tfoot tr:nth-child(3) th')).toHaveText(['Total with tax', '', '107.50', '0.00']);
+});
+
+test('tax sits right of the items list, and wraps under it on small screens', async ({ page }) => {
+  const list = page.getByLabel(/Items, one per line/);
+  const tax = page.getByLabel('Tax (%)');
+  const apply = page.getByRole('button', { name: 'Apply list' });
+
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await page.goto(FILE_URL);
+  let [l, t, a] = [await list.boundingBox(), await tax.boundingBox(), await apply.boundingBox()];
+  expect(t.x).toBeGreaterThan(l.x + l.width);
+  expect(a.y).toBeGreaterThan(l.y + l.height);
+
+  await page.setViewportSize({ width: 360, height: 800 });
+  [l, t, a] = [await list.boundingBox(), await tax.boundingBox(), await apply.boundingBox()];
+  expect(t.y).toBeGreaterThan(l.y + l.height);
+  expect(a.y).toBeGreaterThan(t.y + t.height);
+  expect(l.x + l.width).toBeLessThanOrEqual(360); // textarea fits the screen
+});
+
 test('textarea tolerates currencies, spaces and decimal commas', async ({ page }) => {
   await page.goto(FILE_URL);
   await page.getByLabel(/Items, one per line/).fill(

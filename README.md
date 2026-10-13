@@ -17,6 +17,7 @@ Compare shopping carts side by side: list some products, pick a combination per 
 - **Adding items:** put them in the URL as `name=price` (`?Laptop=999&Bag=45,50`), or paste them in the text box below the table, one per line as `Name,price`, and click "Apply list". `€`, `$`, spaces and `12,50` are all accepted.
 - **Picking:** each scenario is a column. Click `+` to add an item (click again for more copies), `−` to remove one. The total of each scenario is shown at the bottom, with the difference compared to scenario 1.
 - **Saving:** everything is stored in the URL, so reloading keeps your choices and you can bookmark or share the link. The picks are in the `_sc` parameter: `_sc=0.3x2,0.1.2` means scenario 1 has item 0 and item 3 twice, scenario 2 has items 0, 1 and 2.
+- **Tax:** fill the "Tax (%)" box (or add `&_tax=20` to the URL) to show the tax amount and the total with tax under each total. Empty or 0 means no tax.
 
 It's a single `index.html` file with no dependencies: you can also just download it and open it.
 
