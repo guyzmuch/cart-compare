@@ -7,8 +7,8 @@ const FILE_URL = pathToFileURL(path.join(__dirname, '..', 'index.html')).href;
 const ITEMS = [['Base pledge', 99], ['Expansion', 35.5], ['Coins', 19.9], ['Sleeves', 0.1]];
 const withItems = list => FILE_URL + '?' + new URLSearchParams(list.map(([name, price]) => [name, String(price)]));
 
-const plus = (page, item, s) => page.getByRole('button', { name: `Add one ${item} in scenario ${s}` });
-const minus = (page, item, s) => page.getByRole('button', { name: `Remove one ${item} in scenario ${s}` });
+const plus = (page, item, s) => page.getByRole('button', { name: `Add one ${item} in option ${s}` });
+const minus = (page, item, s) => page.getByRole('button', { name: `Remove one ${item} in option ${s}` });
 const count = (page, item, s) => plus(page, item, s).locator('xpath=preceding-sibling::span');
 const totals = page => page.locator('tfoot tr:first-child th:nth-child(n+3)');
 const diffs = page => page.locator('tfoot tr:last-child th:nth-child(n+3)');
@@ -23,9 +23,31 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(() => expect(problems).toEqual([]));
 
-test('starts with two empty scenarios', async ({ page }) => {
+test('starts with two empty options', async ({ page }) => {
   await page.goto(FILE_URL);
   await expect(totals(page)).toHaveText(['0.00', '0.00']);
+});
+
+test('"Add option" sits in the column after the last option', async ({ page }) => {
+  await page.goto(FILE_URL);
+  const add = page.getByRole('button', { name: 'Add option' });
+  await expect(page.locator('thead th')).toHaveText(['Item', 'Price', 'Option 1', 'Option 2×', 'Add option']);
+  await add.click();
+  await expect(page.locator('thead th').last()).toHaveText('Add option');
+  await expect(page.locator('thead th').nth(4)).toHaveText('Option 3×');
+  await expect(add).toBeFocused();
+});
+
+test('deletes the last option, but never the only one', async ({ page }) => {
+  await page.goto(withItems(ITEMS) + '&_sc=0,1,2');
+  await expect(page.getByRole('button', { name: /^Delete option/ })).toHaveCount(1);
+  await page.getByRole('button', { name: 'Delete option 3' }).click();
+  await expect(totals(page)).toHaveText(['99.00', '35.50']);
+  await expect(page).toHaveURL(/_sc=0%2C1$/);
+
+  await page.getByRole('button', { name: 'Delete option 2' }).click();
+  await expect(totals(page)).toHaveText(['99.00']);
+  await expect(page.getByRole('button', { name: /^Delete option/ })).toHaveCount(0);
 });
 
 test('loads items from the query param', async ({ page }) => {
@@ -45,7 +67,7 @@ test('item names are shown as plain text, never as HTML', async ({ page }) => {
   await expect(page.locator('tbody b')).toHaveCount(0);
 });
 
-test('two scenarios give two correct, independent totals', async ({ page }) => {
+test('two options give two correct, independent totals', async ({ page }) => {
   await page.goto(withItems(ITEMS));
   await plus(page, 'Base pledge', 1).click();
   await plus(page, 'Expansion', 1).click();
@@ -58,9 +80,9 @@ test('two scenarios give two correct, independent totals', async ({ page }) => {
   await expect(totals(page)).toHaveText(['99.00', '119.00']);
 });
 
-test('shows the difference with scenario 1', async ({ page }) => {
+test('shows the difference with option 1', async ({ page }) => {
   await page.goto(withItems(ITEMS));
-  await page.getByRole('button', { name: 'Add scenario' }).click();
+  await page.getByRole('button', { name: 'Add option' }).click();
   await plus(page, 'Base pledge', 1).click();
   await plus(page, 'Expansion', 1).click();
   await plus(page, 'Base pledge', 2).click();
@@ -77,7 +99,7 @@ test('shows the difference with scenario 1', async ({ page }) => {
 
 test('reloading the page keeps all state', async ({ page }) => {
   await page.goto(withItems(ITEMS));
-  await page.getByRole('button', { name: 'Add scenario' }).click();
+  await page.getByRole('button', { name: 'Add option' }).click();
   await plus(page, 'Coins', 1).click();
   await plus(page, 'Expansion', 3).click();
   await page.reload();
@@ -122,7 +144,7 @@ test('tax: no tax rows when empty, tax and total with tax when set', async ({ pa
   await expect(taxRows.last()).toBeHidden();
 
   await page.getByLabel('Tax (%)').fill('20');
-  // scenario 1 = 99 + 19.90 = 118.90, scenario 2 = 35.50
+  // option 1 = 99 + 19.90 = 118.90, option 2 = 35.50
   await expect(page.locator('tfoot tr:nth-child(2) th')).toHaveText(['Tax (20%)', '', '23.78', '7.10']);
   await expect(page.locator('tfoot tr:nth-child(3) th')).toHaveText(['Total with tax', '', '142.68', '42.60']);
   await expect(diffs(page)).toHaveText(['', '-100.08']); // diff on the total with tax

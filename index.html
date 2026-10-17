@@ -24,16 +24,19 @@
   .qty.zero { color: #bbb; }
   th:first-child { text-align: left; }
   tfoot th { border-bottom: 0; }                   /* total and diff rows */
-  .cheaper { color: #1a7f37; }                     /* diff vs scenario 1 */
+  .cheaper { color: #1a7f37; }                     /* diff vs option 1 */
   .pricier { color: #cf222e; }
+  .delete {                                        /* "×" after the last option's name */
+    margin-left: 4px; padding: 0 4px;
+    border: 0; background: none; color: #888; font-size: 16px; cursor: pointer;
+  }
+  .delete:hover { color: #cf222e; }
   .settings { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 16px; }
   .settings label { display: block; margin-bottom: 4px; }
   .settings textarea { max-width: 100%; }
 </style>
 </head>
 <body>
-<p><button id="add">Add scenario</button></p>
-
 <table id="table">
   <thead><tr><th>Item</th><th>Price</th></tr></thead>
   <tbody></tbody>
@@ -45,7 +48,7 @@
   </tfoot>
 </table>
 
-<!-- One item row; a quantity cell is appended to it per scenario -->
+<!-- One item row; a quantity cell is appended to it per option -->
 <template id="row-template">
   <tr><td class="name"></td><td class="price"></td></tr>
 </template>
@@ -55,6 +58,13 @@
     <span class="qty"></span>
     <button class="step" data-d="1">+</button>
   </td>
+</template>
+<!-- Header extras: "×" on the last option, "Add option" in the column after it -->
+<template id="delete-template">
+  <button class="delete">×</button>
+</template>
+<template id="add-template">
+  <th><button class="add">Add option</button></th>
 </template>
 
 <!-- Items list and tax side by side; the tax wraps under on small screens -->
@@ -72,7 +82,7 @@
 
 <script>
 // State lives in the URL (see below).
-// items: [name, cents]   scenarios: one { itemIndex: quantity } object per scenario
+// items: [name, cents]   options: one { itemIndex: quantity } object per option
 const table = document.getElementById('table');
 const list = document.getElementById('list');
 const taxInput = document.getElementById('tax');
@@ -99,7 +109,7 @@ function th(text) {
 }
 
 // Every param is an item (?Coins=19.90&Dice=7), except the ones starting with "_":
-// _sc=0.2x3,1 means scenario 1 has item 0 once and item 2 three times, scenario 2 has item 1.
+// _sc=0.2x3,1 means option 1 has item 0 once and item 2 three times, option 2 has item 1.
 // _tax=20 is the tax rate in percent.
 const params = new URLSearchParams(location.search);
 let items = [];
@@ -109,7 +119,7 @@ for (const [name, price] of params) {
 }
 let taxRate = toRate(params.get('_tax') ?? '');
 taxInput.value = taxRate || '';
-let scenarios = (params.get('_sc') ?? ',').split(',').map(s => {
+let options = (params.get('_sc') ?? ',').split(',').map(s => {
   const ticked = {};
   for (const entry of s ? s.split('.') : []) {
     const [i, qty = 1] = entry.split('x').map(Number);
@@ -120,7 +130,7 @@ let scenarios = (params.get('_sc') ?? ',').split(',').map(s => {
 
 function save() {
   const p = new URLSearchParams(items.map(([name, cents]) => [name, format(cents)]));
-  p.append('_sc', scenarios.map(ticked =>
+  p.append('_sc', options.map(ticked =>
     Object.entries(ticked).map(([i, qty]) => qty > 1 ? i + 'x' + qty : i).join('.')).join(','));
   if (taxRate) p.append('_tax', taxRate);
   history.replaceState(null, '', '?' + p);
@@ -130,20 +140,27 @@ function render() {
   const [headRow] = table.tHead.rows;
   const [totalRow, taxRow, withTaxRow, diffRow] = table.tFoot.rows;
 
-  // Remove the previous scenario columns (keep the first two cells)
+  // Remove the previous option columns (keep the first two cells)
   for (const row of [headRow, totalRow, taxRow, withTaxRow, diffRow]) {
     while (row.cells.length > 2) row.deleteCell(-1);
   }
 
-  scenarios.forEach((_, s) => headRow.append(th(`Scenario ${s + 1}`)));
+  options.forEach((_, s) => headRow.append(th(`Option ${s + 1}`)));
+  // The last option can be deleted, as long as one is left
+  if (options.length > 1) {
+    const del = clone('delete-template');
+    del.setAttribute('aria-label', `Delete option ${options.length}`);
+    headRow.lastChild.append(del);
+  }
+  headRow.append(clone('add-template'));
 
-  // One row per item, one quantity cell per scenario
+  // One row per item, one quantity cell per option
   table.tBodies[0].replaceChildren(...items.map(([name, cents], i) => {
     const row = clone('row-template');
     row.querySelector('.name').textContent = name;
     row.querySelector('.price').textContent = format(cents);
 
-    scenarios.forEach((ticked, s) => {
+    options.forEach((ticked, s) => {
       const qty = ticked[i] || 0;
       const cell = clone('cell-template');
       const [minus, plus] = cell.querySelectorAll('button');
@@ -151,8 +168,8 @@ function render() {
 
       Object.assign(minus.dataset, { s, i });
       Object.assign(plus.dataset, { s, i });
-      minus.setAttribute('aria-label', `Remove one ${name} in scenario ${s + 1}`);
-      plus.setAttribute('aria-label', `Add one ${name} in scenario ${s + 1}`);
+      minus.setAttribute('aria-label', `Remove one ${name} in option ${s + 1}`);
+      plus.setAttribute('aria-label', `Add one ${name} in option ${s + 1}`);
       minus.disabled = !qty;
       count.textContent = qty;
       count.classList.toggle('zero', !qty);
@@ -161,7 +178,7 @@ function render() {
     return row;
   }));
 
-  const totals = scenarios.map(ticked =>
+  const totals = options.map(ticked =>
     Object.entries(ticked).reduce((sum, [i, qty]) => sum + items[i][1] * qty, 0));
   totals.forEach(total => totalRow.append(th(format(total))));
 
@@ -173,7 +190,7 @@ function render() {
   taxes.forEach(tax => taxRow.append(th(format(tax))));
   finals.forEach(final => withTaxRow.append(th(format(final))));
 
-  // Difference with scenario 1 (the reference), on the amount actually paid
+  // Difference with option 1 (the reference), on the amount actually paid
   finals.forEach((total, s) => {
     const diff = total - finals[0];
     const cell = th(s === 0 ? '' : (diff > 0 ? '+' : '') + format(diff));
@@ -189,9 +206,9 @@ function render() {
 table.addEventListener('click', e => {
   const { s, i, d } = e.target.dataset;
   if (!d) return;
-  const qty = (scenarios[s][i] || 0) + Number(d);
-  if (qty > 0) scenarios[s][i] = qty;
-  else delete scenarios[s][i];
+  const qty = (options[s][i] || 0) + Number(d);
+  if (qty > 0) options[s][i] = qty;
+  else delete options[s][i];
   save();
   render();
   // keep keyboard focus on the same button ("+" if "−" just got disabled)
@@ -208,15 +225,19 @@ document.getElementById('apply').addEventListener('click', () => {
     const cents = comma > 0 ? toCents(line.slice(comma + 1)) : null;
     if (name && cents !== null) items.push([name, cents]);
   }
-  scenarios = scenarios.map(() => ({}));
+  options = options.map(() => ({}));
   save();
   render();
 });
 
-document.getElementById('add').addEventListener('click', () => {
-  scenarios.push({});
+// "Add option" / "×" in the header (focus goes back to "Add option", which was rebuilt)
+table.tHead.addEventListener('click', e => {
+  if (e.target.matches('.add')) options.push({});
+  else if (e.target.matches('.delete')) options.pop();
+  else return;
   save();
   render();
+  table.querySelector('.add').focus();
 });
 
 // Tax rate: applied as you type
